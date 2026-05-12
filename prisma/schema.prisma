@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                String             @id @default(uuid())
+  name              String?
+  email             String             @unique
+  phone             String?
+  role              String             @default("client")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  bio               String?
+  countryCode       String?
+  countryName       String?
+  deletedAt         DateTime?
+  dialCode          String?
+  domain            String?
+  expectedSalary    Float?
+  experienceLevel   String?
+  image             String?
+  location          String?
+  onboardingStatus  String             @default("pending")
+  password          String?
+  targetRole        String?
+  workType          String?
+  openToRelocation  Boolean            @default(false)
+  noticePeriod      String?
+  visaSponsorship   Boolean            @default(false)
+  industries        String[]           @default([])
+  otp               String?
+  otpExpires        DateTime?
+  assignments       Assignment[]
+  jobs              Job[]
+  notificationPrefs NotificationPrefs?
+  resumes           Resume[]
+  subscription      Subscription?
+  paymentRequests   PaymentRequest[]
+  prepProgress      UserTaskProgress[]
+  atsRequests       ATSRequest[]
+  linkedinUrl       String?
+  githubUrl         String?
+  portfolioUrl      String?
+
+  @@index([email])
+  @@index([role])
+}
+
+model Subscription {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  planType          String    @default("STARTER")
+  status            String    @default("active")
+  price             Float     @default(0)
+  startDate         DateTime  @default(now())
+  renewalDate       DateTime?
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  user              User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+}
+
+model NotificationPrefs {
+  id                 String  @id @default(uuid())
+  userId             String  @unique
+  emailAlerts        Boolean @default(true)
+  pushNotifications  Boolean @default(false)
+  weeklyReports      Boolean @default(true)
+  interviewReminders Boolean @default(false)
+  user               User    @relation(fields: [userId], references: [id])
+}
+
+model Job {
+  id              String   @id @default(uuid())
+  title           String   // Renamed from job_title
+  company         String
+  location        String?
+  country         String?
+  job_url         String?
+  source          String?
+  date_posted     DateTime?
+  scraped_at      DateTime? @default(now())
+  employment_type String?
+  seniority       String?
+  skills          String[]  @default([])
+  description     String?
+  is_remote       Boolean   @default(false)
+  apply_type      String?
+  recruiter_email String?
+  apply_link      String?
+  source_type     String?
+  direct_apply    Boolean   @default(false)
+  ATS_apply       Boolean   @default(false)
+  salary          String?
+  
+  // Existing internal fields
+  status          String    @default("discover")
+  isSaved         Boolean   @default(false)
+  isApplied       Boolean   @default(false)
+  domain          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([userId, isSaved])
+  @@index([userId, isApplied])
+  @@index([company, title])
+}
+
+model Resume {
+  id            String       @id @default(uuid())
+  name          String
+  url           String?
+  isMain        Boolean      @default(false)
+  type          String       @default("Version")
+  atsMatchScore Int?
+  atsReport     Json?
+  atsRequests   ATSRequest[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ATSRequest {
+  id            String   @id @default(uuid())
+  userId        String
+  resumeId      String
+  status        String   @default("PENDING") // PENDING, GENERATED, REJECTED
+  targetRole    String?
+  applicantName String?
+  reportData    Json? // Stores the generated report data
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id])
+  resume        Resume   @relation(fields: [resumeId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Assignment {
+  id        String   @id @default(uuid())
+  title     String
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+}
+
+model Plan {
+  id       String   @id
+  name     String
+  price    Int
+  features String[]
+}
+
+model PrepResource {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  content     String?
+  link        String?
+  type        String   @default("article")
+  domain      String
+  company     String?  @default("General")
+  experience  String   @default("Fresher")
+  difficulty  String?  @default("Medium")
+  isPremium   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tasks       Json?
+}
+
+model UserTaskProgress {
+  id         String   @id @default(uuid())
+  userId     String
+  resourceId String
+  taskId     String
+  completed  Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, resourceId, taskId])
+}
+
+model Admin {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  password       String?
+  masterKey      String?
+  globalSettings Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([email])
+}
+
+model PaymentRequest {
+  id                String       @id @default(uuid())
+  userId            String
+  planType          String
+  amount            Float
+  status            String       @default("PENDING") // PENDING, OTP_VERIFIED, INVOICED, PROOF_UPLOADED, COMPLETED, REJECTED
+  otp               String?
+  otpExpires        DateTime?
+  invoiceUrl        String?
+  proofUrl          String?
+  paymentMethod     String       @default("MANUAL") // "MANUAL" or "RAZORPAY"
+  externalId        String?      @unique // Razorpay Order ID or other external ID
+  razorpayPaymentId String?
+  adminNotes        String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  user              User         @relation(fields: [userId], references: [id])
+  logs              PaymentLog[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model PaymentLog {
+  id               String         @id @default(uuid())
+  paymentRequestId String
+  event            String
+  payload          Json?
+  createdAt        DateTime       @default(now())
+  paymentRequest   PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+
+  @@index([paymentRequestId])
+}
