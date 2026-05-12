@@ -4,6 +4,7 @@ import {
   getJobById,
   updateJobStatus,
   getJobStats,
+  getHeatmapData,
   createJob,
   deleteJob,
   bulkCreateJobs
@@ -16,6 +17,7 @@ const router = express.Router();
 
 router.get('/', protect, getJobs);
 router.get('/stats', protect, getJobStats);
+router.get('/heatmap', protect, getHeatmapData);
 router.get('/:id', protect, getJobById);
 router.patch('/:id/status', protect, updateJobStatus);
 

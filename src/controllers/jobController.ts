@@ -453,6 +453,37 @@ export const getJobStats = async (req: any, res: Response) => {
 };
 
 /**
+ * @desc    Get Heatmap Data (Optimized for performance)
+ * @route   GET /api/jobs/heatmap
+ * @access  Private
+ */
+export const getHeatmapData = async (req: any, res: Response) => {
+  try {
+    const userId = req.user.id;
+
+    // We only need the essential metadata for jobs where isApplied is true
+    const heatmapData = await prisma.job.findMany({
+      where: {
+        userId,
+        isApplied: true
+      },
+      select: {
+        id: true,
+        title: true,
+        company: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    res.status(200).json(heatmapData);
+  } catch (error: any) {
+    console.error("GET_HEATMAP_ERROR:", error);
+    res.status(500).json({ message: "Failed to fetch heatmap intelligence" });
+  }
+};
+
+/**
  * @desc    Get single job by ID (Optimized)
  * @route   GET /api/jobs/:id
  * @access  Private
