@@ -1,7 +1,10 @@
 import "dotenv/config";
 import http from 'http';
-import { WebSocketServer } from 'ws';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { WebSocketServer } = require('ws');
 import type { WebSocket as WS } from 'ws';
+
 import app from './app.js';
 import prisma from './config/prisma.js';
 
@@ -34,9 +37,9 @@ async function main() {
     console.log('✅ Connected to Database via Prisma');
 
     // Start Server
-    server.listen(PORT, () => {
-      console.log(`🚀 Server is running on http://localhost:${PORT}`);
-      console.log(`📡 WebSocket: ws://localhost:${PORT}/ws`);
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
+      console.log(`📡 WebSocket: ws://0.0.0.0:${PORT}/ws`);
       console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (err) {
