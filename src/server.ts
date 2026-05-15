@@ -1,11 +1,9 @@
 import "dotenv/config";
 import http from 'http';
-import ws from 'ws';
-import type { WebSocket as WS, WebSocketServer as WSServerType } from 'ws';
+import { WebSocketServer } from 'ws';
+import type { WebSocket as WS } from 'ws';
 import app from './app.js';
 import prisma from './config/prisma.js';
-
-const WebSocketServer = (ws as any).WebSocketServer || ws;
 
 const PORT = process.env.PORT || 5000;
 
@@ -13,7 +11,7 @@ const PORT = process.env.PORT || 5000;
 const server = http.createServer(app);
 
 // 2. Create WebSocket Server
-const wss: WSServerType = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws' });
 
 wss.on('connection', (ws: WS) => {
   console.log('📡 New WebSocket client connected');
