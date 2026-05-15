@@ -9,41 +9,48 @@ interface JwtPayload {
 
 export const protect = async (req: any, res: Response, next: NextFunction) => {
   let token;
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    try {
-      token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
 
-      req.user = await prisma.user.findUnique({
-        where: { id: decoded.id },
-        select: { id: true, email: true, name: true, role: true },
-      });
-
-      if (!req.user) {
-        const adminAccount = await prisma.admin.findUnique({
-          where: { id: decoded.id },
-          select: { id: true, email: true }
-        });
-        
-        if (adminAccount) {
-          req.user = { ...adminAccount, role: 'admin', name: 'Nexvelt Admin' };
-        }
-      }
-
-      if (!req.user) {
-        logger.warn({ userId: decoded.id }, 'Authorization failed: Identity not found');
-        return res.status(401).json({ message: 'Not authorized, identity not found' });
-      }
-
-      return next();
-    } catch (error: any) {
-      logger.error({ err: error }, 'Authorization failed: Invalid token');
-      return res.status(401).json({ message: 'Not authorized, token failed' });
-    }
+  // 1. Check HttpOnly Cookie (Primary & Secure)
+  if (req.cookies && req.cookies.accessToken) {
+    token = req.cookies.accessToken;
+  } 
+  // 2. Check Authorization Header (Legacy/Mobile Support)
+  else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    token = req.headers.authorization.split(' ')[1];
   }
 
   if (!token) {
-    return res.status(401).json({ message: 'Not authorized, no token' });
+    return res.status(401).json({ message: 'Not authorized, no token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+
+    req.user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, email: true, name: true, role: true },
+    });
+
+    if (!req.user) {
+      const adminAccount = await prisma.admin.findUnique({
+        where: { id: decoded.id },
+        select: { id: true, email: true }
+      });
+      
+      if (adminAccount) {
+        req.user = { ...adminAccount, role: 'admin', name: 'Nexvelt Admin' };
+      }
+    }
+
+    if (!req.user) {
+      logger.warn({ userId: decoded.id }, 'Authorization failed: Identity not found');
+      return res.status(401).json({ message: 'Not authorized, identity not found' });
+    }
+
+    return next();
+  } catch (error: any) {
+    logger.error({ err: error }, 'Authorization failed: Invalid token');
+    return res.status(401).json({ message: 'Not authorized, token failed' });
   }
 };
 

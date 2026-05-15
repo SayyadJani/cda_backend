@@ -19,6 +19,8 @@ import helmet from 'helmet';
 import { apiLimiter } from './middleware/rateLimiter.js';
 import { requestLogger } from './middleware/loggerMiddleware.js';
 import { logger } from './utils/logger.js';
+import cookieParser from 'cookie-parser';
+import { authLimiter } from './middleware/rateLimiter.js';
 
 const app: Application = express();
 
@@ -26,13 +28,16 @@ const app: Application = express();
 app.use(helmet({
   crossOriginResourcePolicy: false,
 }));
+
+app.use(cookieParser());
 const allowedOrigins: any = process.env.NODE_ENV === 'production'
   ? [process.env.FRONTEND_URL, process.env.ADMIN_URL].filter(Boolean)
   : true;
 
 app.use(cors({
   origin: allowedOrigins,
-  credentials: true
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Nexvelt-Request']
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -52,13 +57,19 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
+
 // Health check route
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'OK' });
 });
 
+// Favicon handler to prevent 404 logs
+app.get('/favicon.ico', (req: Request, res: Response) => {
+  res.status(204).end();
+});
+
 // Routes
-app.use('/api/auth', authRouter);
+app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/user', userRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/jobs', jobRouter);
@@ -82,8 +93,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   
-  // Log error for server-side monitoring
-  logger.error({ err, url: req.originalUrl, method: req.method }, `Unhandled Exception: ${err.message}`);
+  // Log error with appropriate level
+  if (statusCode >= 500) {
+    logger.error({ err, url: req.originalUrl, method: req.method }, `Unhandled Exception: ${err.message}`);
+  } else {
+    logger.warn({ url: req.originalUrl, method: req.method, statusCode }, `API Error: ${err.message}`);
+  }
 
   res.status(statusCode).json({
     message: err.message,

@@ -437,12 +437,16 @@ export const getJobStats = async (req: any, res: Response) => {
     const sortedJobs = allJobs.sort((a, b) => (a.userId === userId ? -1 : 1));
 
     sortedJobs.forEach((job: any) => {
-      const key = `${job.company}-${job.title}`;
+      const key = `${job.company.toLowerCase().trim()}|${job.title.toLowerCase().trim()}`;
       if (!processedJobs.has(key)) {
         processedJobs.add(key);
-        if (job.isApplied) stats.applied++;
-        if (job.isSaved) stats.saved++;
-        if (!job.isApplied && !job.isSaved) stats.discover++;
+        if (job.isApplied) {
+          stats.applied++;
+        } else if (job.isSaved) {
+          stats.saved++;
+        } else {
+          stats.discover++;
+        }
       }
     });
 

@@ -1,8 +1,32 @@
 import "dotenv/config";
+import http from 'http';
+import pkg from 'ws';
+import type { WebSocket, WebSocketServer as WSS } from 'ws';
+const { WebSocketServer } = pkg as any;
 import app from './app.js';
 import prisma from './config/prisma.js';
 
 const PORT = process.env.PORT || 5000;
+
+// 1. Create HTTP Server
+const server = http.createServer(app);
+
+// 2. Create WebSocket Server
+const wss: WSS = new WebSocketServer({ server, path: '/ws' });
+
+wss.on('connection', (ws: WebSocket) => {
+  console.log('📡 New WebSocket client connected');
+  
+  ws.on('message', (message) => {
+    console.log(`📩 Message received: ${message}`);
+    // Echo for now
+    ws.send(JSON.stringify({ type: 'ACK', ts: Date.now() }));
+  });
+
+  ws.on('close', () => {
+    console.log('📡 WebSocket client disconnected');
+  });
+});
 
 async function main() {
   try {
@@ -11,8 +35,9 @@ async function main() {
     console.log('✅ Connected to Database via Prisma');
 
     // Start Server
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`🚀 Server is running on http://localhost:${PORT}`);
+      console.log(`📡 WebSocket: ws://localhost:${PORT}/ws`);
       console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (err) {
