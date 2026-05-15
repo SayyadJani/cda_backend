@@ -30,9 +30,14 @@ app.use(helmet({
 }));
 
 app.use(cookieParser());
-const allowedOrigins: any = process.env.NODE_ENV === 'production'
-  ? [process.env.FRONTEND_URL, process.env.ADMIN_URL].filter(Boolean)
-  : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'];
+const allowedOrigins: string[] = process.env.NODE_ENV === 'production'
+  ? [
+      process.env.FRONTEND_URL,
+      process.env.ADMIN_URL,
+      'https://cda-frontend9.vercel.app',
+      'https://cda-admin-dashboard.vercel.app', // Anticipating admin URL
+    ].filter((origin): origin is string => !!origin)
+  : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001', 'http://127.0.0.1:3001'];
 
 app.use(cors({
   origin: allowedOrigins,
