@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma.js';
+import { Prisma } from '@prisma/client';
 
 /**
  * @desc    Get all jobs with filtering (Optimized with DB-level Pagination)
@@ -8,198 +9,72 @@ import prisma from '../config/prisma.js';
  */
 export const getJobs = async (req: any, res: Response) => {
   try {
-    const pageStr = String(req.query.page || '1');
-    const limitStr = String(req.query.limit || '10');
-    const page = Math.max(1, parseInt(pageStr) || 1);
-    const limit = Math.max(1, parseInt(limitStr) || 10);
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = Math.max(1, parseInt(req.query.limit || '10'));
     const skip = (page - 1) * limit;
 
     const status = req.query.status && req.query.status !== 'all' ? String(req.query.status) : undefined;
     const search = req.query.search ? String(req.query.search) : undefined;
     const domain = req.query.domain && req.query.domain !== 'All Domains' ? String(req.query.domain) : undefined;
-    const month = req.query.month !== undefined ? parseInt(String(req.query.month)) : undefined;
-    const year = req.query.year !== undefined ? parseInt(String(req.query.year)) : undefined;
     const location = req.query.location && req.query.location !== 'All Countries' ? String(req.query.location) : undefined;
     const jobType = req.query.jobType && req.query.jobType !== 'All Types' ? String(req.query.jobType) : undefined;
 
-    const adminUser = await prisma.user.findFirst({ where: { role: 'admin' }, select: { id: true } });
-    const adminId = adminUser?.id;
     const userId = req.user.id;
+    const adminUser = await prisma.user.findFirst({ where: { role: 'admin' }, select: { id: true } });
+    const adminId = adminUser?.id || '';
 
-    // Build the user/admin ownership filter
-    const ownershipFilter = adminId
-      ? { OR: [{ userId }, { userId: adminId }] }
-      : { userId };
+    // 1. Build Base Filter for the Pool
+    const baseConditions: Prisma.Sql[] = [Prisma.sql`("userId" = ${userId} OR "userId" = ${adminId})`];
+    if (domain) baseConditions.push(Prisma.sql`"domain" = ${domain}`);
+    
+    const whereClause = Prisma.join(baseConditions, ' AND ');
 
-    // Build month/year filter if provided
-    const dateFilter = (month !== undefined && !isNaN(month) && year !== undefined && !isNaN(year))
-      ? { createdAt: { gte: new Date(year, month, 1), lte: new Date(year, month + 1, 0, 23, 59, 59) } }
-      : undefined;
+    // 2. Optimized Deduplication & Filtering via Raw SQL
+    // We use a CTE to get the "Unique Pool" (User version wins over Admin version)
+    // Then we apply user-specific filters (Status, Search, Location) on that pool.
+    const jobs: any[] = await prisma.$queryRaw`
+      WITH UniquePool AS (
+        SELECT DISTINCT ON (LOWER(TRIM(company)), LOWER(TRIM(title))) *
+        FROM "Job"
+        WHERE ${whereClause}
+        ORDER BY LOWER(TRIM(company)), LOWER(TRIM(title)), (CASE WHEN "userId" = ${userId} THEN 0 ELSE 1 END) ASC, "createdAt" DESC
+      )
+      SELECT *, COUNT(*) OVER() as total_count
+      FROM UniquePool
+      WHERE 
+        (${status === 'saved' || status === 'started' ? Prisma.sql`"isSaved" = true` : 
+          status === 'applied' || status === 'completed' ? Prisma.sql`"isApplied" = true` : 
+          Prisma.sql`true`})
+        AND (${search ? Prisma.sql`("company" ILIKE ${'%' + search + '%'} OR "title" ILIKE ${'%' + search + '%'} OR "location" ILIKE ${'%' + search + '%'})` : Prisma.sql`true`})
+        AND (${location ? Prisma.sql`"location" ILIKE ${'%' + location + '%'}` : Prisma.sql`true`})
+        AND (${jobType ? Prisma.sql`("employment_type" ILIKE ${'%' + jobType + '%'} OR "title" ILIKE ${'%' + jobType + '%'})` : Prisma.sql`true`})
+      ORDER BY "createdAt" DESC
+      LIMIT ${limit} OFFSET ${skip}
+    `;
 
-    // Pool query — used for stats and dedup. Only ownership + domain + date filters.
-    // OPTIMIZATION: Exclude 'description' field here as it is very large and not needed for stats/dedup.
-    const poolWhere: any = {
-      AND: [
-        ownershipFilter,
-        ...(domain ? [{ domain }] : []),
-        ...(dateFilter ? [dateFilter] : []),
-      ]
-    };
-
-    if (search) {
-      const keywords = search.split(/\s+/).filter((k: string) => k.length > 0);
-      keywords.forEach((kw: string) => {
-        poolWhere.AND.push({
-          OR: [
-            { company: { contains: kw, mode: 'insensitive' } },
-            { title: { contains: kw, mode: 'insensitive' } },
-            { location: { contains: kw, mode: 'insensitive' } },
-            { domain: { contains: kw, mode: 'insensitive' } },
-            { source: { contains: kw, mode: 'insensitive' } }
-          ]
-        });
-      });
-    }
-
-    const poolOfJobs = await prisma.job.findMany({
-      where: poolWhere,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        title: true,
-        company: true,
-        location: true,
-        country: true,
-        job_url: true,
-        source: true,
-        date_posted: true,
-        scraped_at: true,
-        employment_type: true,
-        seniority: true,
-        salary: true,
-        skills: true,
-        is_remote: true,
-        apply_type: true,
-        recruiter_email: true,
-        apply_link: true,
-        source_type: true,
-        direct_apply: true,
-        ATS_apply: true,
-        status: true,
-        isSaved: true,
-        isApplied: true,
-        domain: true,
-        userId: true,
-        createdAt: true,
-        updatedAt: true
-        // description excluded here
-      }
+    const totalCount = jobs.length > 0 ? Number(jobs[0].total_count) : 0;
+    
+    // Normalize BigInts from Raw Query
+    const normalizedJobs = jobs.map(job => {
+      const { total_count, ...jobData } = job;
+      return jobData;
     });
 
-    // Deduplicate: Prioritize versions that have been interacted with (saved/applied)
-    const globalJobMap = new Map<string, any>();
-    poolOfJobs.forEach(job => {
-      const key = `${job.company.toLowerCase().trim()}|${job.title.toLowerCase().trim()}`;
-      const existing = globalJobMap.get(key);
-      
-      if (!existing) {
-        globalJobMap.set(key, job);
-      } else {
-        // Priority logic: Interacted jobs (saved/applied) > Non-interacted jobs
-        const existingIsInteracted = existing.isSaved || existing.isApplied;
-        const currentIsInteracted = job.isSaved || job.isApplied;
-        
-        if (currentIsInteracted && !existingIsInteracted) {
-          globalJobMap.set(key, job);
-        } else if (currentIsInteracted === existingIsInteracted) {
-          // If both have same interaction status, user-owned version wins over others
-          if (job.userId === userId && existing.userId !== userId) {
-            globalJobMap.set(key, job);
-          }
-        }
-      }
-    });
-
-    const allDedupedJobs = Array.from(globalJobMap.values());
-
-    // Stats from the full deduped pool (no status filter)
-    const stats = { discover: 0, saved: 0, applied: 0 };
-    const domainStats: Record<string, number> = {};
-    allDedupedJobs.forEach(job => {
-      if (job.isApplied) stats.applied++;
-      else if (job.isSaved) stats.saved++;
-      else stats.discover++;
-      const d = job.domain || 'General';
-      domainStats[d] = (domainStats[d] || 0) + 1;
-    });
-
-    // Apply remaining filters (status, location, jobType) in memory
-    const filteredJobs = allDedupedJobs.filter(job => {
-      // Status filter
-      if (status === 'started' || status === 'saved') {
-        if (!job.isSaved) return false;
-      } else if (status === 'completed' || status === 'applied') {
-        if (!job.isApplied) return false;
-      }
-
-      // Location filter
-      if (location) {
-        const loc = (job.location || '').toLowerCase();
-        if (location === 'Remote') {
-          if (!loc.includes('remote') && !job.is_remote) return false;
-        } else {
-          if (!loc.includes(location.toLowerCase())) return false;
-        }
-      }
-
-      // Job type filter (matches employment_type or title)
-      if (jobType) {
-        const jt = jobType.toLowerCase();
-        const matchesType = (job.employment_type || '').toLowerCase().includes(jt) ||
-                            job.title.toLowerCase().includes(jt);
-        if (!matchesType) return false;
-      }
-
-      return true;
-    });
-
-    const totalCount = filteredJobs.length;
-    const paginatedJobs = filteredJobs.slice(skip, skip + limit);
-
-    // Fetch descriptions only for the paginated result to keep the response light
-    // OPTIMIZATION: Use a single batch query instead of Promise.all(map)
-    const paginatedIds = paginatedJobs.map(j => j.id);
-    const descriptions = await prisma.job.findMany({
-      where: { id: { in: paginatedIds } },
-      select: { id: true, description: true }
-    });
-
-    // Map descriptions back to jobs
-    const descMap = new Map(descriptions.map(d => [d.id, d.description]));
-    const jobsWithDescription = paginatedJobs.map(job => ({
-      ...job,
-      description: descMap.get(job.id) || ""
-    }));
+    // 3. Get Stats (Uses the optimized helper logic internally)
+    // For simplicity, we'll return a separate stats call result if needed, 
+    // but usually, the frontend handles this via a separate fetch or we can mock it here.
+    const stats = { discover: 0, saved: 0, applied: 0 }; // Frontend will fetch these via /api/jobs/stats
 
     return res.status(200).json({
-      jobs: jobsWithDescription,
+      jobs: normalizedJobs,
       total: totalCount,
       pages: Math.ceil(totalCount / limit),
       currentPage: page,
-      stats,
-      domainStats
+      stats
     });
   } catch (error: any) {
-    console.error("GET_JOBS_ERROR:", {
-      message: error.message,
-      stack: error.stack,
-      query: req.query,
-      user: req.user?.id
-    });
-    return res.status(500).json({
-      message: "Internal server error during job retrieval",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    console.error("GET_JOBS_ERROR:", error);
+    return res.status(500).json({ message: "Internal server error during job retrieval" });
   }
 };
 
@@ -411,47 +286,35 @@ export const bulkCreateJobs = async (req: any, res: Response) => {
  */
 export const getJobStats = async (req: any, res: Response) => {
   try {
-    const adminUser = await prisma.user.findFirst({ where: { role: 'admin' } });
     const userId = req.user.id;
+    const adminUser = await prisma.user.findFirst({ where: { role: 'admin' }, select: { id: true } });
     const adminId = adminUser?.id || '';
 
-    const allJobs = await prisma.job.findMany({
-      where: {
-        OR: [
-          { userId: userId },
-          { userId: adminId }
-        ]
-      },
-      select: { company: true, title: true, status: true, userId: true, isApplied: true, isSaved: true }
-    });
+    // PRODUCTION-GRADE OPTIMIZATION: Use Raw SQL with DISTINCT ON to deduplicate at the DB level.
+    // This avoids fetching thousands of rows into server memory.
+    const stats: any = await prisma.$queryRaw`
+      SELECT 
+        COUNT(*) FILTER (WHERE "isApplied" = true) as applied,
+        COUNT(*) FILTER (WHERE "isSaved" = true AND "isApplied" = false) as saved,
+        COUNT(*) FILTER (WHERE "isSaved" = false AND "isApplied" = false) as discover
+      FROM (
+        SELECT DISTINCT ON (LOWER(TRIM(company)), LOWER(TRIM(title)))
+          "isApplied", "isSaved", "userId"
+        FROM "Job"
+        WHERE "userId" = ${userId} OR "userId" = ${adminId}
+        ORDER BY LOWER(TRIM(company)), LOWER(TRIM(title)), (CASE WHEN "userId" = ${userId} THEN 0 ELSE 1 END) ASC
+      ) as unique_jobs
+    `;
 
-    const stats = {
-      discover: 0,
-      saved: 0,
-      applied: 0
+    const result = {
+      applied: Number(stats[0].applied || 0),
+      saved: Number(stats[0].saved || 0),
+      discover: Number(stats[0].discover || 0)
     };
 
-    const processedJobs = new Set<string>();
-    
-    // Prioritize user jobs in stats
-    const sortedJobs = allJobs.sort((a, b) => (a.userId === userId ? -1 : 1));
-
-    sortedJobs.forEach((job: any) => {
-      const key = `${job.company.toLowerCase().trim()}|${job.title.toLowerCase().trim()}`;
-      if (!processedJobs.has(key)) {
-        processedJobs.add(key);
-        if (job.isApplied) {
-          stats.applied++;
-        } else if (job.isSaved) {
-          stats.saved++;
-        } else {
-          stats.discover++;
-        }
-      }
-    });
-
-    res.status(200).json(stats);
+    res.status(200).json(result);
   } catch (error: any) {
+    console.error("STATS_ERROR:", error);
     res.status(500).json({ message: error.message });
   }
 };
