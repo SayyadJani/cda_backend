@@ -295,8 +295,8 @@ export const getJobStats = async (req: any, res: Response) => {
     const stats: any = await prisma.$queryRaw`
       SELECT 
         COUNT(*) FILTER (WHERE "isApplied" = true) as applied,
-        COUNT(*) FILTER (WHERE "isSaved" = true AND "isApplied" = false) as saved,
-        COUNT(*) FILTER (WHERE "isSaved" = false AND "isApplied" = false) as discover
+        COUNT(*) FILTER (WHERE "isSaved" = true) as saved,
+        COUNT(*) as discover
       FROM (
         SELECT DISTINCT ON (LOWER(TRIM(company)), LOWER(TRIM(title)))
           "isApplied", "isSaved", "userId"

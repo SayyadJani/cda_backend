@@ -37,6 +37,7 @@ export const getAllPrepResources = async (req: any, res: Response) => {
 
     res.status(200).json(resources);
   } catch (error: any) {
+    require('fs').writeFileSync('prep-error.txt', error.stack || error.message);
     res.status(500).json({ message: error.message });
   }
 };
